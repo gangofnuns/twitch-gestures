@@ -1,0 +1,16 @@
+# Target the binary for the target architecture (amazon linux)
+export GOOS=linux
+export GOARCH=amd64
+
+# build the binary
+go build -o ${GO_COMPILED_EXECUTABLE} service
+
+
+# build the docker file around the compiled binary
+docker build -t ${IMAGE_NAME} --no-cache .
+
+# Upload the docker file to ECS where it gets deployed to a service.
+docker push 203974224355.dkr.ecr.us-west-2.amazonaws.com/${IMAGE_NAME}:latest
+
+# NOTE: GoCV doesn't generally support building the binary for the target arch 
+# since GoCV wraps OpenCV, which has a fairly complex native footprint
