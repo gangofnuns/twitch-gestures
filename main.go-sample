@@ -1,0 +1,81 @@
+package main
+
+import (
+    "time"
+)
+
+// A manager that wraps over application meta data in a persistent store
+type ApplicationRegistry struct {
+    poller *ApplicationRegistryPoller // Internal poller to fetch data
+}
+
+
+// The entire loaded catalog
+type ApplicationRegistryData struct {
+    allApplications []*Application;
+    loadedOn        time.Time;
+}
+
+// An individual application's meta data
+type Application struct {
+    AppId          int64;
+    AppName        string;
+}
+
+// Initialize the registry. Starts an internal poller and 
+// makes sure the initial data can be loaded.
+//
+func (this *ApplicationRegistry) Init() {
+    Log.Info("Initializing app registry");
+    this.poller = &ApplicationRegistryPoller{};
+    this.poller.init();
+    this.FetchAllApplications();
+}
+
+
+// External facing API - Grab all applications
+func (this *ApplicationRegistry) FetchAllApplications() []*Application {
+    this.poller.fetchRequestChannel <- 1;             // Tell the poller we'd like latest data
+    loaded := <- this.poller.fetchResponseChannel;  // Respond with the last loaded data
+    Log.Info("Fetched data as of " + loaded.loadedOn.String())
+    return loaded.allApplications;
+}
+
+
+// Poller - Responsible for fetching from DB
+type ApplicationRegistryPoller struct {
+    fetchRequestChannel chan int;                        // Request channel - someone's asking for last loaded meta data
+    fetchResponseChannel chan *ApplicationRegistryData;    // Response channel - send back a pointer to the last loaded data
+    ticker *time.Ticker;                                // Underlying ticker
+    loadedData *ApplicationRegistryData;                // Latest loaded meta data
+}
+
+// Initialize the internal poller.
+func (this *ApplicationRegistryPoller) init() {
+    Log.Info("Starting application registry poller");
+    this.ticker = time.NewTicker(time.Second * 1);
+    this.fetchRequestChannel = make(chan int);
+    this.fetchResponseChannel = make(chan *ApplicationRegistryData);
+    this.loadImmediate();
+    go this.run();
+}
+
+func (this *ApplicationRegistryPoller) loadImmediate() { // Fetch from metadata from MC/RDS
+    var newData = &ApplicationRegistryData{}; //
+    newData.loadedOn = time.Now();
+    // Go hit MC/DB. Note that this will likely block anyone waiting for a response
+
+    this.loadedData = newData; // Swap in latest
+}
+
+// Poller Impl
+func (this *ApplicationRegistryPoller) run() {
+    for {
+        select {
+            case <-this.ticker.C: // Poll hit, go and grab latest from Memcache/RDS
+                this.loadImmediate();
+            case <-this.fetchRequestChannel: // Someone's asking for our latest data, return the last loaded data
+                this.fetchResponseChannel <- this.loadedData;
+        }
+    }
+}
